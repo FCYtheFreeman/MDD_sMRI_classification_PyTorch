@@ -1,0 +1,1 @@
+train/val/test logs and network weights will automatically saved here
