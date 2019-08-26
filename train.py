@@ -78,7 +78,7 @@ def train_epoch(epoch, fold_id, data_loader, model, criterion, optimizer,
                         '{}{}_weights_fold{}_epoch{}.pth'.format(opt.model_name, opt.model_depth, fold_id, epoch))
             states = {
                 'fold': fold_id,
-                'epoch': epoch + 1,
+                'epoch': epoch,
                 'arch': opt.arch,
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),

@@ -14,13 +14,10 @@ from tensorboardX import SummaryWriter
 
 def run(fold_id, opt):
     if opt.root_path != '':
-        opt.result_path = OsJoin(opt.root_path, opt.result_path)
-        if not os.path.exists(opt.result_path):
-            os.makedirs(opt.result_path)
-        if opt.resume_path:
-            opt.resume_path = OsJoin(opt.root_path, opt.resume_path)
-        if opt.pretrain_path:
-            opt.pretrain_path = OsJoin(opt.root_path, opt.pretrain_path)
+        result_path = OsJoin(opt.root_path, opt.result_path)
+        event_path = OsJoin(opt.root_path, opt.event_path)
+        if not os.path.exists(result_path):
+            os.makedirs(result_path)
     opt.arch ='{}-{}'.format(opt.model_name,opt.model_depth)
     #print(opt)
 
@@ -34,10 +31,19 @@ def run(fold_id, opt):
 
     if not opt.no_train:
         training_data = TrainSet(fold_id=fold_id)
-        train_loader = DataLoader(training_data, batch_size = opt.batch_size,shuffle = True,
-                                                num_workers = opt.n_threads, pin_memory =True)
-        log_path = OsJoin(opt.result_path, opt.data_type, opt.model_name+str(opt.model_depth),
-                                                                    'logs_fold%s'%str(fold_id))
+        train_loader = DataLoader(training_data, batch_size=opt.batch_size, shuffle=True,
+                                  num_workers=opt.n_threads, pin_memory=True)
+        if opt.pretrain_path:
+            log_path = OsJoin(result_path, opt.data_type, opt.model_name + '_' + str(opt.model_depth) + '_pretrain',
+                              'logs_fold%s' % str(fold_id))
+            event_path = OsJoin(event_path, opt.data_type, opt.model_name + '_' + str(opt.model_depth) + '_pretrain',
+                                'logs_fold%s' % str(fold_id))
+        elif not opt.pretrain_path:
+            log_path = OsJoin(result_path, opt.data_type, opt.model_name + '_' + str(opt.model_depth),
+                              'logs_fold%s' % str(fold_id))
+            event_path = OsJoin(event_path, opt.data_type, opt.model_name + '_' + str(opt.model_depth),
+                                'logs_fold%s' % str(fold_id))
+
         if not os.path.exists(log_path):
             os.makedirs(log_path)
         train_logger = Logger(
@@ -48,8 +54,18 @@ def run(fold_id, opt):
             OsJoin(log_path, 'train_batch.log'),
             ['epoch','batch','iter','loss','acc','lr'])
 
-        optimizer = optim.Adam(parameters, lr=opt.learning_rate, weight_decay=opt.weight_decay)
-        #optimizer = optim.SGD(parameters, lr=opt.learning_rate, momentum=0.9)
+
+        if opt.train_pretrain is not '':
+            params = [
+                {'params': filter(lambda p: p.requires_grad, parameters['base_parameters']), 'lr': opt.learning_rate*0.001},
+                {'params': filter(lambda p: p.requires_grad, parameters['new_parameters']), 'lr': opt.learning_rate}
+            ]
+        else:
+            params = [{'params': filter(lambda p: p.requires_grad, parameters), 'lr': opt.learning_rate}]
+
+        optimizer = optim.Adam(params, weight_decay=opt.weight_decay)
+        #optimizer = optim.SGD(params, momentum=0.9)
+
         scheduler = lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min',
                                                    factor=opt.lr_decay_factor, patience =opt.lr_patience)
     if not opt.no_val:
@@ -58,20 +74,19 @@ def run(fold_id, opt):
                                                     num_workers = opt.n_threads, pin_memory=True)
         val_logger =  Logger(OsJoin(log_path,'val.log'),['epoch','loss','acc','recall'])
 
-    if opt.pretrain_path:
-        print('loading checkpoint{}'.format(opt.resume_path))
-        checkpoint = torch.load(opt.resume_path)
-        assert opt.arch==checkpoint['arch']
-
-        opt.begin_epoch = checkpoint['epoch']
-        model.load_state_dict(checkpoint['state_dict'])
-        if not opt.no_train:
-            optimizer.load_state_dict(checkpoint['optimizer'])
+    # if opt.pretrain_path:
+    #     print('loading checkpoint{}'.format(opt.pretrain_path))
+    #     checkpoint = torch.load(opt.pretrain_path)
+    #     assert opt.arch==checkpoint['arch']
+    #
+    #     opt.begin_epoch = checkpoint['epoch']
+    #     model.load_state_dict(checkpoint['state_dict'])
+    #     if not opt.no_train:
+    #         optimizer.load_state_dict(checkpoint['optimizer'])
 
     #print('run')
-    writer = SummaryWriter(logdir='events/{}/{}_{}/{}'.format(opt.data_type, opt.model_name,
-                                                              opt.model_depth, 'fold%s'%str(fold_id)))
-    for i in range(opt.begin_epoch,opt.n_epochs+1):
+    writer = SummaryWriter(logdir=event_path)
+    for i in range(opt.begin_epoch, opt.n_epochs+1):
         if not opt.no_train:
             train_epoch(i, fold_id, train_loader, model, criterion, optimizer, opt,
                         train_logger, train_batch_logger, writer)

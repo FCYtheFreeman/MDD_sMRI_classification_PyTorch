@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 from models import resnet, pre_resnet, wide_resnet, densenet, simpleCNN
 
@@ -119,9 +120,42 @@ def generate_model(opt):
         if opt.model_depth == 8:
             model = simpleCNN._3DCNN()
 
-
     if not opt.no_cuda:
         model = model.cuda()
         model = nn.DataParallel(model, device_ids=None)
+        net_dict = model.state_dict()
+    else:
+        net_dict = model.state_dict()
+
+    # load pretrain
+    if opt.pretrain_path is not '':
+        print('loading pretrained model {}'.format(opt.pretrain_path))
+        pretrain = torch.load(opt.pretrain_path)
+        pretrain_dict = {k: v for k, v in pretrain['state_dict'].items() if k in net_dict.keys()}
+
+        net_dict.update(pretrain_dict)
+        model.load_state_dict(net_dict)
+
+        new_parameters = []
+        for pname, p in model.named_parameters():
+            for layer_name in opt.new_layer_names:
+                if pname.find(layer_name) >= 0:
+                    new_parameters.append(p)
+                    break
+
+
+        new_parameters_id = list(map(id, new_parameters))
+        if not opt.train_pretrain:
+            for p in model.parameters():
+                # freeze the pretrained parameters that not in new_parameters
+                if id(p) not in new_parameters_id:
+                    p.requires_grad = False
+
+        base_parameters = list(filter(lambda p: id(p) not in new_parameters_id, model.parameters()))
+
+        parameters = {'base_parameters': base_parameters,
+                      'new_parameters': new_parameters}
+
+        return model, parameters
 
     return model, model.parameters()
